@@ -1,111 +1,237 @@
-#include "smalloc.h"
-
 #include <stdio.h>
 #include <assert.h>
+#include <stdint.h>
+#include <stddef.h>
+#include <string.h>
 
-#define print_bits(x)                                            \
-  do {                                                           \
-    unsigned long long a__ = (x);                                \
-    size_t bits__ = sizeof(x) * 8;                               \
-    printf(#x ": ");                                             \
-    while (bits__--) putchar(a__ &(1ULL << bits__) ? '1' : '0'); \
-    putchar('\n');                                               \
-  } while (0)
+#include <fcntl.h>
+#include <unistd.h>
 
-void
-print_array(uint8_t* ptr, size_t size)
+#define SMALLOC_IMPLEMENTATION
+#define SMALLOC_MEMSET memset
+#define MEMORY_SZ 4096
+#include "smalloc.h"
+
+int dump_status(int fd, Memory *mem)
 {
-	for (size_t i = 0; i < size; i++) {
-		print_bits(ptr[i]);
-	}
+    return write(fd, mem->status, NB_STATUS);
 }
 
 void
-print_status(uint8_t* arr, size_t arr_size)
+test_alloc_1b()
 {
-	for (size_t i = 0; i < arr_size; i++) {
-		uint8_t byte = arr[i];
+    Memory mem = {0};
+    int fd = open("dumps/test_alloc_1b.bin", O_CREAT | O_RDWR, 0644);
+    if (fd < 0) {
+        perror("open");
+        return;
+    }
+    size_t sz = 8;
+    uint64_t *data = alloc(&mem, sz);
 
-		for (int j = 3; j >= 0; j--) {
-			// Extract 2 bits
-			uint8_t two_bits = (byte >> (6 - 2 * j)) & 0x03; // Shift and mask to get 2 bits
+    assert(data != NULL &&  "First allocation failed.");
+    assert(mem.data == data &&  "The first alloc should start at the top of the mem.");
+    dump_status(fd, &mem);
 
-			// Select the corresponding status string
-			const char* status = status_str[two_bits];
+    close(fd);
+}
 
-			// Print or process the status
-			printf("%s ", status);
-		}
-		printf("\n");
-	}
+void
+test_alloc_1row()
+{
+   Memory mem = {0};
+    int fd = open("dumps/test_alloc_1row.bin", O_CREAT | O_RDWR, 0644);
+    if (fd < 0) {
+        perror("open");
+        return;
+    }
+    size_t sz = 64;
+    uint64_t *data = alloc(&mem, sz);
+
+    assert(data != NULL &&  "First allocation failed.");
+    assert(mem.data == data &&  "The first alloc should start at the top of the mem.");
+    dump_status(fd, &mem);
+
+    close(fd);
+}
+
+void
+test_alloc_all()
+{
+    Memory mem = {0};
+    int fd = open("dumps/test_alloc_all.bin", O_CREAT | O_RDWR, 0644);
+    if (fd < 0) {
+        perror("open");
+        return;
+    }
+    size_t sz = NB_STATUS * CHUNK_SZ * 4;
+    uint64_t *data = alloc(&mem, sz);
+
+    assert(data != NULL &&  "First allocation failed.");
+    assert(mem.data == data &&  "The first alloc should start at the top of the mem.");
+    dump_status(fd, &mem);
+
+    close(fd);
+}
+
+void
+test_alloc_too_big()
+{
+    Memory mem = {0};
+    int fd = open("dumps/test_alloc_too_big.bin", O_CREAT | O_RDWR, 0644);
+    if (fd < 0) {
+        perror("open");
+        return;
+    }
+    size_t sz = NB_STATUS * CHUNK_SZ * 4 + 1;
+    uint64_t *data = alloc(&mem, sz);
+
+    assert(data == NULL &&  "Allocation should fail.");
+    dump_status(fd, &mem);
+
+    close(fd);
+}
+
+void
+test_alloc_free()
+{
+    Memory mem = {0};
+    int fd = open("dumps/test_alloc_free.bin", O_CREAT | O_RDWR, 0644);
+    if (fd < 0) {
+        perror("open");
+        return;
+    }
+    size_t sz = 8;
+    uint64_t *data = alloc(&mem, sz);
+
+    assert(data != NULL &&  "First allocation failed.");
+    assert(mem.data == data &&  "The first alloc should start at the top of the mem.");
+    dump_status(fd, &mem);
+
+    dealloc(&mem, data);
+    assert(mem.status[0] == 0x00 &&  "The status should be 0x00 after dealloc.");
+    dump_status(fd, &mem);
+
+    close(fd);
+}
+
+void
+test_alloc_free_alloc()
+{
+    Memory mem = {0};
+    int fd = open("dumps/test_alloc_free_alloc.bin", O_CREAT | O_RDWR, 0644);
+    if (fd < 0) {
+        perror("open");
+        return;
+    }
+    size_t sz = 8;
+    uint64_t *data = alloc(&mem, sz);
+
+    assert(data != NULL &&  "First allocation failed.");
+    assert(mem.data == data &&  "The first alloc should start at the top of the mem.");
+    dump_status(fd, &mem);
+
+    dealloc(&mem, data);
+    assert(mem.status[0] == 0x00 &&  "The status should be 0x00 after dealloc.");
+    dump_status(fd, &mem);
+
+    uint64_t *data2 = alloc(&mem, sz);
+    assert(data2 == data &&  "The second alloc should reuse the first allocation.");
+    dump_status(fd, &mem);
+
+    close(fd);
+}
+
+void
+test_alloc_alloc()
+{
+    Memory mem = {0};
+    int fd = open("dumps/test_alloc_alloc.bin", O_CREAT | O_RDWR, 0644);
+    if (fd < 0) {
+        perror("open");
+        return;
+    }
+    size_t sz = 8;
+    uint64_t *data = alloc(&mem, sz);
+
+    assert(data != NULL &&  "First allocation failed.");
+    assert(mem.data == data &&  "The first alloc should start at the top of the mem.");
+    dump_status(fd, &mem);
+
+    size_t sz2 = 8;
+    uint64_t *data2 = alloc(&mem, sz2);
+
+    assert(data2 != NULL &&  "Second allocation failed.");
+    assert(data + 1 == data2 &&  "The second alloc should start after the first one.");
+    dump_status(fd, &mem);
+
+    close(fd);
+}
+
+void
+test_alloc_alloc_alloc_free_middle()
+{
+    Memory mem = {0};
+    int fd = open("dumps/test_alloc_alloc_alloc_free_middle.bin", O_CREAT | O_RDWR, 0644);
+    if (fd < 0) {
+        perror("open");
+        return;
+    }
+    size_t sz = 8;
+    uint64_t *data = alloc(&mem, sz);
+
+    assert(data != NULL &&  "First allocation failed.");
+    assert(mem.data == data &&  "The first alloc should start at the top of the mem.");
+    dump_status(fd, &mem);
+
+    size_t sz2 = 16;
+    uint64_t *data2 = alloc(&mem, sz2);
+
+    assert(data2 != NULL &&  "Second allocation failed.");
+    assert(data + 1 == data2 &&  "The second alloc should start after the first one.");
+    dump_status(fd, &mem);
+
+    size_t sz3 = 32;
+    uint64_t *data3 = alloc(&mem, sz3);
+    size_t chunk3 = ((sz3 / CHUNK_SZ) + ((sz3 % CHUNK_SZ) ? 1 : 0)) * CHUNK_SZ;
+
+    assert(data3 != NULL &&  "Third allocation failed.");
+    assert(data2 + 2 == data3 &&  "The third alloc should start after the second one.");
+    dump_status(fd, &mem);
+
+    dealloc(&mem, data2);
+    dump_status(fd, &mem);
+
+    uint64_t * redata2 = alloc(&mem, sz2);
+    assert(redata2 != NULL &&  "Second allocation failed.");
+    assert(redata2 == data2 &&  "The second alloc should reuse the first allocation.");
+    dump_status(fd, &mem);
+
+    close(fd);
 }
 
 int
 main(int argc, char *argv[])
 {
-	uint8_t *start = (uint8_t*) page.data;
+    printf("Running tests...\n");
+    test_alloc_1b();
+    printf("test_alloc_1b passed\n");
+    test_alloc_1row();
+    printf("test_alloc_1row passed\n");
+    test_alloc_all();
+    printf("test_alloc_all passed\n");
+    test_alloc_too_big();
+    printf("test_alloc_too_big passed\n");
+    test_alloc_free();
+    printf("test_alloc_free passed\n");
+    test_alloc_free_alloc();
+    printf("test_alloc_free_alloc passed\n");
+    test_alloc_alloc();
+    printf("test_alloc_alloc passed\n");
+    test_alloc_alloc_alloc_free_middle();
+    printf("test_alloc_alloc_alloc_free_middle passed\n");
 
-	// Test 1: First allocation
-	size_t sz1 = 8;
-	uint8_t *data1 = alloc(sz1);
-	size_t chunk1 = ((sz1 / CHUNK_SZ) + ((sz1 % CHUNK_SZ) ? 1 : 0)) * CHUNK_SZ;
-
-	assert(data1 != NULL && "First allocation failed.");
-	assert(start == data1 && "The first alloc should start at the top of the page.");
-	printf("First allocation successful: chunk size = %ld\n", chunk1);
-	print_status(page.status, 4);
-
-	// Test 2: Second allocation
-	size_t sz2 = 70;
-	uint8_t *data2 = alloc(sz2);
-	size_t chunk2 = ((sz2 / CHUNK_SZ) + ((sz2 % CHUNK_SZ) ? 1 : 0)) * CHUNK_SZ;
-
-	assert(data2 != NULL && "Second allocation failed.");
-	assert(&data1[chunk1] == data2 && "The second alloc should start right after the first.");
-	printf("Second allocation successful: chunk size = %ld\n", chunk2);
-	print_status(page.status, 4);
-
-	// Test 3: Third allocation
-	size_t sz3 = 80;
-	uint8_t *data3 = alloc(sz3);
-	size_t chunk3 = ((sz3 / CHUNK_SZ) + ((sz3 % CHUNK_SZ) ? 1 : 0)) * CHUNK_SZ;
-
-	assert(data3 != NULL && "Third allocation failed.");
-	assert(&data2[chunk2] == data3 && "The third alloc should start right after the second.");
-	printf("Third allocation successful: chunk size = %ld\n", chunk3);
-	print_status(page.status, 4);
-
-	// Test 4: Deallocate and reallocate
-	dealloc(data2);
-	uint8_t *data4 = alloc(sz2);
-
-	assert(data4 != NULL && "Reallocation after deallocation failed.");
-	assert(data2 == data4 && "Reallocation should occur at the same place as the deallocated chunk.");
-	printf("Reallocation successful after deallocation.\n");
-	print_status(page.status, 4);
-
-	// Test 5: Smaller allocation after deallocation
-	dealloc(data4);
-	size_t sz5 = 20;
-	uint8_t *data5 = alloc(sz5);
-	size_t chunk5 = ((sz5 / CHUNK_SZ) + ((sz5 % CHUNK_SZ) ? 1 : 0)) * CHUNK_SZ;
-
-	assert(data5 != NULL && "Allocation of smaller size after deallocation failed.");
-	assert(data5 == data2 && "Reallocation should occur at the same place as the deallocated chunk.");
-	printf("Smaller allocation successful after deallocation: chunk size = %ld\n", chunk5);
-	print_status(page.status, 4);
-
-	// Test 6: Allocating after all previous deallocations
-	dealloc(data1);
-	dealloc(data3);
-	uint8_t *data6 = alloc(sz3);
-
-	assert(data6 != NULL && "Allocation after multiple deallocations failed.");
-	printf("Allocation successful after multiple deallocations");
-
-	// Print page status (for visual inspection, if needed)
-	print_status(page.status, 4);
-
-	return 0;
+    printf("All tests passed.\n");
+    printf("See the dumps in './dumps', NB_STATUS=%d\n", NB_STATUS);
+    return 0;
 }
-

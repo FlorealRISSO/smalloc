@@ -20,83 +20,151 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <stdint.h>
-#include <string.h>
 
-#define PAGE_SZ 4096
+#ifndef SMALLOC_H
+#define SMALLOC_H
+
+#ifndef MEMORY_SZ
+#error "You must define MEMORY_SZ, e.g. #define MEMORY_SZ 4096"
+#endif
+
+#define ALIGN_SZ 8
+#define STATUS_SZ 1
 #define CHUNK_SZ 8
+#define NB_STATUS_OCTET 4
 
-#define NB_STATUS 124
-#define NB_CHUNK 496
+#define COUPLE_STATUS_CHUNK (STATUS_SZ + (CHUNK_SZ * NB_STATUS_OCTET))
+#define PADDING_MAX (MEMORY_SZ % COUPLE_STATUS_CHUNK)
+#define USEFUL_SZ (MEMORY_SZ - PADDING_MAX)
 
-// -------------------- Status
-#define MAKE_STATUS(_status) \
-	_status << 6 | _status << 4 | _status << 2 | _status \
+#define NB_STATUS (USEFUL_SZ / COUPLE_STATUS_CHUNK)
+#define NB_CHUNK (NB_STATUS * NB_STATUS_OCTET)
+#define PADDING_SZ (PADDING_MAX - (NB_STATUS % ALIGN_SZ))
 
-#define ACCESS(_value, _i) \
-	((_value) >> ((_i) * 2)) & 0b11
+typedef struct Memory {
+	uint8_t status[NB_STATUS]; // equivalent uint2_t[NB_CHUNK]
+	#if PADDING_SZ > 0
+        uint8_t padding[PADDING_SZ];
+    #endif
+	uint64_t data[NB_CHUNK];
+} Memory;
 
-#define SET(_value, _i, _status) \
-	_value = ((_value) & status_clear_mask[(_i)]) | ((_status) << (_i * 2))
 
-#define SET_TO(_value, _i, _status) \
-	do { \
-		int M_mask = (0b11111111 << ((_i) * 2)); \
-		_value &= M_mask; \
-		uint8_t M_status = MAKE_STATUS(_status); \
-		M_status = (~M_mask) & M_status; \
-		_value |= M_status; \
-	} while(0)
+void* alloc(Memory *mem, size_t sz);
+void dealloc(Memory *mem, void *ptr);
 
-#define SET_FROM(_value, _i, _status) \
-	do { \
-		int M_mask = (0b11111111 >> (8 - (_i * 2))); \
-		_value &= M_mask; \
-		uint8_t M_status = MAKE_STATUS(_status); \
-		M_status = (~M_mask) & M_status; \
-		_value |= M_status; \
-	} while(0)
+#endif // SMALLOC_H
 
+#ifdef SMALLOC_IMPLEMENTATION
+
+#ifndef SMALLOC_MEMSET
+#error "You must define SMALLOC_MEMSET, e.g. #define SMALLOC_MEMSET memset"
+#endif
+
+#ifndef INLINE
+#define INLINE inline __attribute__((always_inline))
+#endif
+
+static_assert(sizeof(Memory) == MEMORY_SZ, "Memory size must be MEMORY_SZ");
+static_assert(NB_STATUS * NB_STATUS_OCTET == NB_CHUNK, "NB_STATUS * NB_STATUS_OCTET must be equal to NB_CHUNK");
+static_assert(NB_CHUNK >= 0, "NB_CHUNK must be >= 0");
+
+typedef enum {
+	FREE  = 0b00,
+	USED1 = 0b01,
+	USED2 = 0b10,
+	USED3 = 0b11,
+} Status;
 
 const char* status_str[4] = { "FREE", "USED1", "USED2", "USED3" };
 const uint8_t status_mask[4] = { 0b11, 0b11 << 2, 0b11 << 4, 0b11 << 6 };
 const uint8_t status_clear_mask[4] = { 0b11111100, 0b11110011, 0b11001111, 0b00111111 };
-typedef enum {
-	FREE = 0,
-	USED1 = 1,
-	USED2 = 2,
-	USED3 = 3,
-} Status;
+const int tbl[4][4] = {
+	{ USED1, USED2, USED1, USED1 },
+	{ USED2, USED2, USED3, USED2 },
+	{ USED1, USED3, USED1, USED1 },
+	{ USED1, USED2, USED1, USED1 },
+};
+
+INLINE
+uint8_t
+make_status(uint8_t status)
+{
+    return status << 6 | status << 4 | status << 2 | status;
+}
+
+INLINE
+uint8_t
+st_access(uint8_t status, int i)
+{
+    return (status >> (i * 2)) & 0b11;
+}
+
+INLINE
+uint8_t
+set(uint8_t value, uint8_t status, int i)
+{
+    return ((value) & status_clear_mask[(i)]) | ((status) << (i * 2));
+}
+
+INLINE
+uint8_t
+set_to(uint8_t value, uint8_t status, int i)
+{
+    int M_mask = (0b11111111 << ((i) * 2));
+	value &= M_mask;
+	uint8_t M_status = make_status(status);
+	M_status = (~M_mask) & M_status;
+	value |= M_status;
+
+	return value;
+}
+
+INLINE
+uint8_t
+set_from(uint8_t value, uint8_t status, int i)
+{
+    int M_mask = (0b11111111 >> (8 - (i * 2)));
+    value &= M_mask;
+    uint8_t M_status = make_status(status);
+    M_status = (~M_mask) & M_status;
+    value |= M_status;
+
+    return value;
+}
+
+INLINE
+uint8_t
+set_part(uint8_t value, uint8_t status, int start, int end)
+{
+    int M_mask = (0b11111111 << (end * 2)) | (0b11111111 >> (8 - (start * 2)));
+    value &= M_mask;
+    uint8_t M_status = make_status(status);
+    M_status = (~M_mask) & M_status;
+    value |= M_status;
+
+    return value;
+}
 
 static void
 status_memset(uint8_t* ptr, Status status, size_t istart, size_t jstart, size_t iend, size_t jend)
 {
 	if (istart == iend) {
-		for (int j = jstart; j <= jend; j++) {
-			SET(ptr[istart], j, status);
-		}
-		return;
+    	ptr[istart] = set_part(ptr[istart], status, jstart, jend + 1);
+        return;
 	}
 
-	SET_FROM(ptr[istart], jstart, status);
+	ptr[istart] = set_from(ptr[istart], status, jstart);
 	if (istart + 1 <= iend - 1) {
-		memset(&ptr[istart + 1], MAKE_STATUS(status), (iend - istart) - 1);
+		SMALLOC_MEMSET(&ptr[istart + 1], make_status(status), (iend - istart) - 1);
 	}
-	SET_TO(ptr[iend], (jend + 1), status);
+	ptr[iend] = set_to(ptr[iend], status, jend + 1);
 }
 
 // --------------------
-typedef struct Page {
-	uint8_t status[NB_STATUS];
-	uint32_t next;
-	uint64_t data[NB_CHUNK];
-} Page;
-
-Page page = {0};
-
 
 void*
-alloc(size_t sz)
+alloc(Memory *mem, size_t sz)
 {
 	if (!sz) {
 		return 0;
@@ -110,7 +178,7 @@ alloc(size_t sz)
 	int count = 0, i = 0, subidx = 0;
 
 #define VERIFY(_status, _j) \
-	sub_status = ACCESS(_status, _j); \
+	sub_status = st_access(_status, _j); \
 	if (sub_status == FREE) { \
 		if (count == 0) { \
 			istart = i; \
@@ -127,7 +195,7 @@ alloc(size_t sz)
 	}
 
 	while (i < NB_STATUS) {
-		uint8_t status = page.status[i];
+		uint8_t status = mem->status[i];
 		Status sub_status;
 		VERIFY(status, 0);
 		VERIFY(status, 1);
@@ -141,48 +209,47 @@ alloc(size_t sz)
 		return 0;
 	}
 
-	static int tbl[4][4] = {
-		{ USED1, USED2, USED1, USED1 },
-		{ USED2, USED2, USED3, USED2 },
-		{ USED1, USED3, USED1, USED1 },
-		{ USED1, USED2, USED1, USED1 },
-	};
-
+	if (iend > NB_STATUS) {
+	    return 0;
+	}
 
 	int next = 0;
 	if (iend == NB_STATUS) {
-		next = page.status[iend + 1];
+		next = mem->status[iend + 1];
 	}
 
 	int prev = 0;
 	if (istart != 0 && jstart != 0) {
-		prev = ACCESS(page.status[istart], (jstart - 1));
+		prev = st_access(mem->status[istart], (jstart - 1));
 	} else if (istart != 0) {
-		prev = ACCESS(page.status[istart - 1], 3);
+		prev = st_access(mem->status[istart - 1], 3);
 	} else {
-		prev = ACCESS(page.status[istart], (jstart - 1));
+		prev = st_access(mem->status[istart], (jstart - 1));
 	}
 
 	Status sub_status = tbl[prev][next];
-	status_memset(page.status, sub_status, istart, jstart, iend, jend);
+	status_memset(mem->status, sub_status, istart, jstart, iend, jend);
 
-	return &page.data[((istart * 4) + jstart)];
+	return &mem->data[((istart * 4) + jstart)];
 }
 
 
 void
-dealloc(void *ptr)
+dealloc(Memory *mem, void *ptr)
 {
-	int idx = (uint64_t*)ptr - page.data;
+	int idx = (uint64_t*)ptr - mem->data;
 	int istart = idx / 4;
 	int jstart = idx % 4;
 
-	Status status = (Status) ACCESS(page.status[istart], jstart);
+	Status status = (Status) st_access(mem->status[istart], jstart);
 
-#define IFSET_CLEAR(_i, _j) \
-	x = ACCESS(page.status[_i], _j); \
-	if (x != status) return; \
-	SET(page.status[_i], _j, FREE); 			 \
+#define IFSET_CLEAR(_i, _j)                             \
+do {                                                    \
+    int x = st_access(mem->status[_i], _j);               \
+	if (x != status) return;                            \
+	mem->status[_i] = set(mem->status[_i], FREE, _j); \
+} while (0)
+
 
 	for (int j = jstart; j < 4; j++) {
 		int x;
@@ -190,7 +257,6 @@ dealloc(void *ptr)
 	}
 
 	for (int i = istart + 1; i < NB_STATUS; i++) {
-		int x;
 		IFSET_CLEAR(i, 0);
 		IFSET_CLEAR(i, 1);
 		IFSET_CLEAR(i, 2);
@@ -199,3 +265,4 @@ dealloc(void *ptr)
 #undef IFSET_CLEAR
 }
 
+#endif // SMALLOC_IMPLEMENTATION

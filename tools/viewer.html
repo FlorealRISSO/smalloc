@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <title>Status Viewer</title>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                max-width: 1000px;
+                margin: 0 auto;
+                padding: 20px;
+                line-height: 1.6;
+                background-color: #f4f7f6;
+            }
+            .config-section {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 20px;
+                margin-bottom: 20px;
+                background-color: #e0e8e4;
+                padding: 15px;
+                border-radius: 5px;
+                box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            }
+            .config-input {
+                display: flex;
+                align-items: center;
+                margin-bottom: 10px;
+            }
+            .config-input label {
+                margin-right: 10px;
+                width: 150px;
+            }
+            .status-grid {
+                display: grid;
+                grid-template-columns: repeat(8, 1fr);
+                gap: 5px;
+                margin-bottom: 20px;
+            }
+            .status-item {
+                padding: 10px;
+                text-align: center;
+                border: 1px solid #ddd;
+                font-size: 12px;
+                transition: transform 0.2s;
+            }
+            .status-item:hover {
+                transform: scale(1.05);
+                z-index: 10;
+                box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+            }
+            .navigation {
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                gap: 20px;
+                margin-bottom: 20px;
+            }
+            .navigation button {
+                padding: 10px 20px;
+                background-color: #4a90e2;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                cursor: pointer;
+                transition: background-color 0.3s;
+            }
+            .navigation button:disabled {
+                background-color: #b0b0b0;
+                cursor: not-allowed;
+            }
+            .navigation button:hover:not(:disabled) {
+                background-color: #357abd;
+            }
+            #fileInput,
+            #updateConfigBtn {
+                margin: 10px 0;
+            }
+            .color-input {
+                width: 100px;
+                height: 30px;
+                margin-right: 10px;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>Status Viewer</h1>
+
+        <div class="config-section">
+            <div>
+                <div class="config-input">
+                    <label for="statusSzInput">STATUS_SZ:</label>
+                    <input
+                        type="number"
+                        id="statusSzInput"
+                        value="124"
+                        min="1"
+                        max="1024"
+                    />
+                </div>
+                <div class="config-input">
+                    <label for="freeColorInput">FREE Color:</label>
+                    <input
+                        type="color"
+                        id="freeColorInput"
+                        class="color-input"
+                        value="#3498db"
+                    />
+                </div>
+                <div class="config-input">
+                    <label for="used1ColorInput">USED1 Color:</label>
+                    <input
+                        type="color"
+                        id="used1ColorInput"
+                        class="color-input"
+                        value="#e74c3c"
+                    />
+                </div>
+                <div class="config-input">
+                    <label for="used2ColorInput">USED2 Color:</label>
+                    <input
+                        type="color"
+                        id="used2ColorInput"
+                        class="color-input"
+                        value="#2ecc71"
+                    />
+                </div>
+                <div class="config-input">
+                    <label for="used3ColorInput">USED3 Color:</label>
+                    <input
+                        type="color"
+                        id="used3ColorInput"
+                        class="color-input"
+                        value="#f39c12"
+                    />
+                </div>
+                <button id="updateConfigBtn">Update Configuration</button>
+            </div>
+            <div>
+                <input type="file" id="fileInput" />
+            </div>
+        </div>
+
+        <div class="navigation">
+            <button id="prevPageBtn" disabled>Previous Page</button>
+            <span id="pageCounter">Page: 0 / 0</span>
+            <button id="nextPageBtn" disabled>Next Page</button>
+        </div>
+
+        <div id="statusGrid" class="status-grid"></div>
+
+        <script>
+            // Get configuration inputs
+            const statusSzInput = document.getElementById("statusSzInput");
+            const freeColorInput = document.getElementById("freeColorInput");
+            const used1ColorInput = document.getElementById("used1ColorInput");
+            const used2ColorInput = document.getElementById("used2ColorInput");
+            const used3ColorInput = document.getElementById("used3ColorInput");
+            const updateConfigBtn = document.getElementById("updateConfigBtn");
+
+            // Existing elements
+            const statusGrid = document.getElementById("statusGrid");
+            const fileInput = document.getElementById("fileInput");
+            const nextPageBtn = document.getElementById("nextPageBtn");
+            const prevPageBtn = document.getElementById("prevPageBtn");
+            const pageCounter = document.getElementById("pageCounter");
+
+            // Application state
+            let fileData = null;
+            let currentPage = 0;
+            let totalPages = 0;
+            let STATUS_SZ = 124;
+            let colorConfig = {
+                free: "#3498db",
+                used1: "#e74c3c",
+                used2: "#2ecc71",
+                used3: "#f39c12",
+            };
+
+            function getStatusColor(status) {
+                switch (status) {
+                    case 0:
+                        return colorConfig.free; // 00
+                    case 1:
+                        return colorConfig.used1; // 01
+                    case 2:
+                        return colorConfig.used2; // 10
+                    case 3:
+                        return colorConfig.used3; // 11
+                    default:
+                        return colorConfig.free;
+                }
+            }
+
+            function updatePageNavigation() {
+                prevPageBtn.disabled = currentPage === 0;
+                nextPageBtn.disabled = currentPage >= totalPages - 1;
+                pageCounter.textContent = `Page: ${currentPage + 1} / ${totalPages}`;
+            }
+
+            function renderStatusGrid(startIndex) {
+                statusGrid.innerHTML = "";
+                for (let i = 0; i < STATUS_SZ * 4; i++) {
+                    const byteIndex = Math.floor(i / 4) + startIndex;
+                    const bitPosition = i % 4;
+
+                    // Ensure we don't go out of bounds
+                    let status = 0;
+                    if (byteIndex < fileData.length) {
+                        status =
+                            (fileData[byteIndex] >> (bitPosition * 2)) & 0b11;
+                    }
+
+                    const statusItem = document.createElement("div");
+                    statusItem.classList.add("status-item");
+                    statusItem.textContent = status;
+                    statusItem.style.backgroundColor = getStatusColor(status);
+                    statusGrid.appendChild(statusItem);
+                }
+
+                // Update page navigation
+                updatePageNavigation();
+            }
+
+            // Update configuration
+            updateConfigBtn.addEventListener("click", () => {
+                // Validate and update STATUS_SZ
+                STATUS_SZ = parseInt(statusSzInput.value) || 124;
+
+                // Update color configuration
+                colorConfig = {
+                    free: freeColorInput.value,
+                    used1: used1ColorInput.value,
+                    used2: used2ColorInput.value,
+                    used3: used3ColorInput.value,
+                };
+
+                // Re-render if file is already loaded
+                if (fileData) {
+                    totalPages = Math.ceil(fileData.length / STATUS_SZ);
+                    currentPage = 0;
+                    renderStatusGrid(currentPage);
+                }
+            });
+
+            // File input event
+            fileInput.addEventListener("change", async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const arrayBuffer = await file.arrayBuffer();
+                fileData = new Uint8Array(arrayBuffer);
+
+                // Calculate total pages
+                totalPages = Math.ceil(fileData.length / STATUS_SZ);
+                currentPage = 0;
+                renderStatusGrid(currentPage);
+            });
+
+            // Next page navigation
+            nextPageBtn.addEventListener("click", () => {
+                if (currentPage < totalPages - 1) {
+                    currentPage++;
+                    renderStatusGrid(currentPage * STATUS_SZ);
+                }
+            });
+
+            // Previous page navigation
+            prevPageBtn.addEventListener("click", () => {
+                if (currentPage > 0) {
+                    currentPage--;
+                    renderStatusGrid(currentPage * STATUS_SZ);
+                }
+            });
+        </script>
+    </body>
+</html>
