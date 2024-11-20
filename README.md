@@ -2,7 +2,7 @@
 
 This project is a proof-of-concept for a minimalist memory allocator (`smalloc`) designed to allocate and deallocate memory dynamically within a fixed-size memory buffer. It uses a compact metadata system to track memory usage and is capable of functioning without an operating system.
 
-For a detailed explanation of the design, implementation, and use cases, check out the [article on smalloc](https://florealrisso.github.io/articles/mini-alloc.html).
+For a detailed explanation of the design, implementation, and use cases, check out the [article on smalloc](https://florealrisso.github.io/articles/smalloc.html).
 
 ## **Getting Started**
 
@@ -35,4 +35,4 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 ## **More Information**
 
-For an in-depth look into the allocator, its internals, and examples, visit the [accompanying article](https://florealrisso.github.io/articles/mini-alloc.html).
+For an in-depth look into the allocator, its internals, and examples, visit the [accompanying article](https://florealrisso.github.io/articles/smalloc.html).
